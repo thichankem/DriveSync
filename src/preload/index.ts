@@ -16,8 +16,11 @@ import type {
   StashEntry,
   ReflogEntry,
   CompareResult,
+  GraphCommit,
+  BackupSchedule,
   SyncResult,
-  SyncStep
+  SyncStep,
+  DepsStatus
 } from '@shared/types'
 
 const api = {
@@ -38,7 +41,9 @@ const api = {
     create: (opts: CreateRepoOptions): Promise<{ repo?: Repo; error?: string }> =>
       ipcRenderer.invoke('repo:create', opts),
     clone: (url: string, dest: string): Promise<{ repo?: Repo; error?: string }> =>
-      ipcRenderer.invoke('repo:clone', { url, dest })
+      ipcRenderer.invoke('repo:clone', { url, dest }),
+    importFiles: (repoPath: string, paths: string[]): Promise<{ added: number }> =>
+      ipcRenderer.invoke('repo:importFiles', repoPath, paths)
   },
 
   // Git
@@ -151,7 +156,8 @@ const api = {
     diffBetween: (cwd: string, b: string, h: string, p: string): Promise<FileDiff> =>
       ipcRenderer.invoke('git:diffBetween', cwd, b, h, p),
     openFile: (cwd: string, p: string): Promise<string> =>
-      ipcRenderer.invoke('git:openFile', cwd, p)
+      ipcRenderer.invoke('git:openFile', cwd, p),
+    graphLog: (cwd: string): Promise<GraphCommit[]> => ipcRenderer.invoke('git:graphLog', cwd)
   },
 
   // Tài khoản Google Drive
@@ -163,6 +169,29 @@ const api = {
     active: (cwd: string): Promise<string | null> => ipcRenderer.invoke('acc:active', cwd),
     apply: (cwd: string, id: string): Promise<{ ok: boolean; message?: string }> =>
       ipcRenderer.invoke('acc:apply', cwd, id)
+  },
+
+  // Lịch tự động sao lưu
+  schedule: {
+    get: (cwd: string): Promise<BackupSchedule> => ipcRenderer.invoke('schedule:get', cwd),
+    set: (cwd: string, cfg: BackupSchedule): Promise<void> =>
+      ipcRenderer.invoke('schedule:set', cwd, cfg),
+    onRan: (cb: (d: { repoPath: string; message: string; time: number }) => void): (() => void) => {
+      const listener = (_e: unknown, d: { repoPath: string; message: string; time: number }) => cb(d)
+      ipcRenderer.on('schedule:ran', listener)
+      return () => ipcRenderer.removeListener('schedule:ran', listener)
+    }
+  },
+
+  // Phụ thuộc (git/dvc/python)
+  deps: {
+    check: (): Promise<DepsStatus> => ipcRenderer.invoke('deps:check'),
+    install: (): Promise<DepsStatus> => ipcRenderer.invoke('deps:install'),
+    onProgress: (cb: (s: string) => void): (() => void) => {
+      const listener = (_e: unknown, s: string) => cb(s)
+      ipcRenderer.on('deps:progress', listener)
+      return () => ipcRenderer.removeListener('deps:progress', listener)
+    }
   },
 
   // DVC
