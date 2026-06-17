@@ -23,10 +23,13 @@ import { RepoSettingsModal, StashModal, TagsModal } from './components/MoreModal
 import { GuideModal } from './components/GuideModal'
 import { TimeMachineModal } from './components/TimeMachineModal'
 import { CompareModal } from './components/CompareModal'
+import { GraphView } from './components/GraphView'
+import { ScheduleModal } from './components/ScheduleModal'
+import { DepsBanner } from './components/DepsBanner'
 import { Menu, Prompt, type MenuItem } from './components/ui'
-import { AlertIcon, BranchIcon, ChevronDown, DatabaseIcon, PlusIcon, RepoIcon, SyncIcon } from './components/icons'
+import { AlertIcon, BranchIcon, ChevronDown, DatabaseIcon, PlusIcon, RepoIcon, SyncIcon, TrashIcon } from './components/icons'
 
-type Tab = 'changes' | 'history' | 'dvc'
+type Tab = 'changes' | 'history' | 'graph' | 'dvc'
 type ModalKind =
   | 'create'
   | 'add'
@@ -38,6 +41,7 @@ type ModalKind =
   | 'guide'
   | 'timemachine'
   | 'compare'
+  | 'schedule'
   | null
 type BranchPick = 'switch' | 'merge' | 'rebase' | 'delete' | null
 
@@ -66,6 +70,7 @@ export default function App() {
   const [selFile, setSelFile] = useState<string | null>(null)
   const [diff, setDiff] = useState<FileDiff | null>(null)
   const [selCommit, setSelCommit] = useState<string | null>(null)
+  const [graphSel, setGraphSel] = useState<Commit | null>(null)
 
   const [modal, setModal] = useState<ModalKind>(null)
   const [repoMenu, setRepoMenu] = useState(false)
@@ -77,6 +82,8 @@ export default function App() {
 
   const [busy, setBusy] = useState(false)
   const [toast, setToast] = useState('')
+  const [tick, setTick] = useState(0)
+  const [dragOver, setDragOver] = useState(false)
 
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncRunning, setSyncRunning] = useState(false)
@@ -119,8 +126,19 @@ export default function App() {
     setDvcInfo(dv)
     setRepoState(rs)
     setActiveAccId(acc)
+    setTick((t) => t + 1)
     return st
   }, [])
+
+  // Thông báo khi lịch tự động sao lưu chạy
+  useEffect(
+    () =>
+      window.api.schedule.onRan((d) => {
+        showToast('⏰ Tự động sao lưu: ' + d.message)
+        if (current && d.repoPath === current.path) refresh(current)
+      }),
+    [current, refresh, showToast]
+  )
 
   const openRepo = useCallback(
     async (repo: Repo) => {
@@ -215,6 +233,7 @@ export default function App() {
   }
   const doDeleteBranch = async (name: string) => {
     if (!current) return
+    if (!confirm(`Xoá branch "${name}"?`)) return
     const r = await window.api.git.deleteBranch(current.path, name, false)
     if (!r.ok) {
       if (confirm(`Branch "${name}" chưa được merge. Xoá luôn (force)?`)) {
@@ -317,6 +336,20 @@ export default function App() {
       }
     })
 
+  // ---- Kéo-thả file vào để stage ----
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragOver(false)
+    if (!current) return
+    const paths = Array.from(e.dataTransfer.files)
+      .map((f) => (f as unknown as { path: string }).path)
+      .filter(Boolean)
+    if (!paths.length) return
+    const r = await window.api.repo.importFiles(current.path, paths)
+    showToast(`Đã thêm & stage ${r.added} file`)
+    await refreshKeepSelection()
+  }
+
   // ---- Điều phối hành động từ menu native ----
   const dispatch = (action: string) => {
     // Hành động không cần repo đang mở
@@ -339,8 +372,12 @@ export default function App() {
         return setTab('changes')
       case 'view-history':
         return setTab('history')
+      case 'view-graph':
+        return setTab('graph')
       case 'view-dvc':
         return setTab('dvc')
+      case 'schedule':
+        return setModal('schedule')
       case 'refresh':
         void refresh(current)
         return
@@ -428,6 +465,7 @@ export default function App() {
   if (!current) {
     return (
       <div className="app">
+        <DepsBanner />
         <Welcome
           repos={repos}
           onOpen={openRepo}
@@ -466,6 +504,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <DepsBanner />
       {/* Toolbar */}
       <div className="toolbar">
         <button className="toolbar-btn toolbar-repo" onClick={() => setRepoMenu((v) => !v)}>
@@ -538,8 +577,33 @@ export default function App() {
             />
           </div>
           {branches.map((b) => (
-            <div key={b.name} className={`dropdown-item ${b.current ? 'active' : ''}`} onClick={() => checkout(b.name)}>
-              <BranchIcon /> {b.name} {b.current && '✓'}
+            <div
+              key={b.name}
+              className={`dropdown-item ${b.current ? 'active' : ''}`}
+              style={{ justifyContent: 'space-between' }}
+            >
+              <span
+                style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflow: 'hidden' }}
+                onClick={() => checkout(b.name)}
+              >
+                <BranchIcon />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {b.name}
+                </span>
+                {b.current && '✓'}
+              </span>
+              {!b.current && (
+                <button
+                  className="branch-del"
+                  title={`Xoá branch "${b.name}"`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    doDeleteBranch(b.name)
+                  }}
+                >
+                  <TrashIcon size={13} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -578,7 +642,23 @@ export default function App() {
       )}
 
       {/* Body */}
-      <div className="body">
+      <div
+        className="body"
+        style={{ position: 'relative' }}
+        onDragOver={(e) => {
+          if (tab === 'changes') {
+            e.preventDefault()
+            if (!dragOver) setDragOver(true)
+          }
+        }}
+        onDragLeave={(e) => {
+          if (e.target === e.currentTarget) setDragOver(false)
+        }}
+        onDrop={handleDrop}
+      >
+        {dragOver && tab === 'changes' && (
+          <div className="drop-overlay">📥 Thả file vào đây để thêm vào dự án &amp; stage</div>
+        )}
         {status && !status.isRepo ? (
           <div className="empty-state" style={{ flex: 1 }}>
             <AlertIcon size={28} />
@@ -645,6 +725,26 @@ export default function App() {
                   onCompare={() => setModal('compare')}
                 />
               )}
+              {tab === 'graph' && (
+                <GraphView
+                  repoPath={current.path}
+                  refreshKey={tick}
+                  selected={selCommit}
+                  onSelect={(c) => {
+                    setSelCommit(c.hash)
+                    setGraphSel({
+                      hash: c.hash,
+                      shortHash: c.shortHash,
+                      author: c.author,
+                      email: '',
+                      date: c.relativeDate,
+                      relativeDate: c.relativeDate,
+                      subject: c.subject,
+                      body: ''
+                    })
+                  }}
+                />
+              )}
             </div>
 
             <div className="main-content">
@@ -671,6 +771,9 @@ export default function App() {
               )}
               {tab === 'history' && (
                 <CommitView repoPath={current.path} commit={selectedCommitObj} onChanged={() => refresh(current)} toast={showToast} />
+              )}
+              {tab === 'graph' && (
+                <CommitView repoPath={current.path} commit={graphSel} onChanged={() => refresh(current)} toast={showToast} />
               )}
             </div>
           </>
@@ -706,6 +809,9 @@ export default function App() {
         <button className={`tab ${tab === 'history' ? 'active' : ''}`} onClick={() => setTab('history')}>
           Lịch sử
         </button>
+        <button className={`tab ${tab === 'graph' ? 'active' : ''}`} onClick={() => setTab('graph')}>
+          Đồ thị
+        </button>
         <button className={`tab ${tab === 'dvc' ? 'active' : ''}`} onClick={() => setTab('dvc')}>
           DVC
         </button>
@@ -737,6 +843,8 @@ export default function App() {
       return <TimeMachineModal repoPath={current.path} onClose={() => setModal(null)} onChanged={() => refresh(current)} toast={showToast} />
     if (modal === 'compare' && current)
       return <CompareModal repoPath={current.path} branches={branches} onClose={() => setModal(null)} />
+    if (modal === 'schedule' && current)
+      return <ScheduleModal repoPath={current.path} onClose={() => setModal(null)} toast={showToast} />
     return null
   }
 }
