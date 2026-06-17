@@ -14,7 +14,8 @@ import type {
   RepoState,
   StashEntry,
   ReflogEntry,
-  CompareResult
+  CompareResult,
+  GraphCommit
 } from '@shared/types'
 
 const SEP = '' // unit separator để tách field trong git log
@@ -647,6 +648,35 @@ export async function compareRefs(cwd: string, base: string, head: string): Prom
     }
   }
   return { commits, files }
+}
+
+/** Lấy dữ liệu để vẽ đồ thị nhánh: commit kèm cha (parents) và nhãn ref, mọi nhánh. */
+export async function graphLog(cwd: string, limit = 300): Promise<GraphCommit[]> {
+  const fmt = ['%H', '%h', '%P', '%D', '%an', '%ar', '%s'].join(SEP) + REC
+  const res = await git(cwd, [
+    'log',
+    '--all',
+    '--date-order',
+    `--max-count=${limit}`,
+    `--pretty=format:${fmt}`
+  ])
+  if (!res.ok) return []
+  return res.stdout
+    .split(REC)
+    .map((r) => r.replace(/^\n/, ''))
+    .filter((r) => r.trim())
+    .map((rec) => {
+      const f = rec.split(SEP)
+      return {
+        hash: f[0],
+        shortHash: f[1],
+        parents: f[2] ? f[2].split(' ').filter(Boolean) : [],
+        refs: f[3] || '',
+        author: f[4],
+        relativeDate: f[5],
+        subject: f[6]
+      } as GraphCommit
+    })
 }
 
 /** Diff của 1 file giữa hai ref. */
