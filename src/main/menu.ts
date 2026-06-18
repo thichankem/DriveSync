@@ -44,6 +44,7 @@ export function createAppMenu(getWindow: () => BrowserWindow | null) {
       submenu: [
         item('Thay đổi (Changes)', 'view-changes', 'CmdOrCtrl+1'),
         item('Lịch sử (History)', 'view-history', 'CmdOrCtrl+2'),
+        item('Đồ thị nhánh (Graph)', 'view-graph', 'CmdOrCtrl+4'),
         item('DVC + Google Drive', 'view-dvc', 'CmdOrCtrl+3'),
         item('Làm mới dữ liệu', 'refresh', 'CmdOrCtrl+R'),
         { type: 'separator' },
@@ -102,7 +103,9 @@ export function createAppMenu(getWindow: () => BrowserWindow | null) {
         item('Tải data về từ Drive (dvc pull)', 'dvc-pull'),
         { type: 'separator' },
         item('Quản lý tài khoản Google Drive…', 'accounts'),
-        item('Kết nối Google Drive tự động', 'drive-connect')
+        item('Kết nối Google Drive tự động', 'drive-connect'),
+        { type: 'separator' },
+        item('⏰ Tự động sao lưu theo lịch…', 'schedule')
       ]
     },
     {
