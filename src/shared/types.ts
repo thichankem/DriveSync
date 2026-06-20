@@ -158,10 +158,41 @@ export interface CompareResult {
   files: FileChange[]
 }
 
+export interface GraphCommit {
+  hash: string
+  shortHash: string
+  parents: string[]
+  /** Nhãn ref, vd "HEAD -> main, origin/main, tag: v1.0" */
+  refs: string
+  author: string
+  relativeDate: string
+  subject: string
+}
+
+export type BackupAction = 'commit' | 'push' | 'sync'
+export type BackupUnit = 'minute' | 'hour' | 'day'
+
+export interface BackupSchedule {
+  enabled: boolean
+  every: number
+  unit: BackupUnit
+  action: BackupAction
+  lastRun?: number
+}
+
 export interface AutoConnectResult {
   ok: boolean
   message?: string
   path?: string
   driveRoot?: string
   needFolder?: boolean
+}
+
+/** Trạng thái các công cụ CLI mà app cần (kiểm tra khi khởi động). */
+export interface DepsStatus {
+  git: boolean
+  dvc: boolean
+  python: boolean
+  /** true khi đủ điều kiện tối thiểu để chạy (git + dvc). */
+  ok: boolean
 }
