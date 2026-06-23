@@ -3,11 +3,14 @@ import { promises as fs } from 'fs'
 import { join } from 'path'
 import * as gitSvc from './services/git'
 import * as dvcSvc from './services/dvc'
+import * as depsSvc from './services/deps'
 import * as driveSvc from './services/drive'
 import * as accountsSvc from './services/accounts'
+import * as schedulerSvc from './services/scheduler'
 import * as syncSvc from './services/sync'
 import * as store from './services/store'
-import type { DriveAccount } from '@shared/types'
+import { basename, resolve } from 'path'
+import type { BackupSchedule, DriveAccount } from '@shared/types'
 import type { CreateRepoOptions } from '@shared/types'
 
 export function registerIpc(getWindow: () => BrowserWindow | null) {
@@ -167,7 +170,35 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
     gitSvc.diffBetween(cwd, b, h, p)
   )
   ipcMain.handle('git:openFile', (_e, cwd: string, p: string) =>
-    shell.openPath(require('path').join(cwd, p))
+    shell.openPath(join(cwd, p))
+  )
+  ipcMain.handle('git:graphLog', (_e, cwd: string) => gitSvc.graphLog(cwd))
+
+  // ---------- Kéo-thả: nhập file vào repo rồi stage ----------
+  ipcMain.handle('repo:importFiles', async (_e, repoPath: string, paths: string[]) => {
+    const rel: string[] = []
+    for (const p of paths) {
+      try {
+        const abs = resolve(p)
+        const inside = abs.toLowerCase().startsWith(resolve(repoPath).toLowerCase())
+        let target = abs
+        if (!inside) {
+          target = join(repoPath, basename(abs))
+          await fs.copyFile(abs, target)
+        }
+        rel.push(target.slice(resolve(repoPath).length).replace(/^[\\/]/, ''))
+      } catch {
+        /* bỏ qua file lỗi */
+      }
+    }
+    if (rel.length) await gitSvc.stage(repoPath, rel)
+    return { added: rel.length }
+  })
+
+  // ---------- Lịch tự động sao lưu ----------
+  ipcMain.handle('schedule:get', (_e, cwd: string) => schedulerSvc.getSchedule(cwd))
+  ipcMain.handle('schedule:set', (_e, cwd: string, cfg: BackupSchedule) =>
+    schedulerSvc.setSchedule(cwd, cfg)
   )
   ipcMain.handle('git:openTerminal', (_e, cwd: string) => {
     const { spawn } = require('child_process')
@@ -176,6 +207,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null) {
     } else {
       shell.openPath(cwd)
     }
+  })
+
+  // ---------- Phụ thuộc (git/dvc/python) ----------
+  ipcMain.handle('deps:check', () => depsSvc.check())
+  ipcMain.handle('deps:install', () => {
+    const win = getWindow()
+    return depsSvc.install((s) => win?.webContents.send('deps:progress', s))
   })
 
   // ---------- DVC ----------
